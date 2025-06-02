@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.env
+
+# Model files and temp data
+backend/seamless_communication/
+*.pt
+temp/
+tmp/
+
+# OS files
+.DS_Store
+.vscode/
+*.log
+
+# React build
+frontend/build/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Conda environments
+.conda/
