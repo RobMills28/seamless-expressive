@@ -18,7 +18,12 @@ app = FastAPI(title="SeamlessExpressive Video Translator")
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://127.0.0.1:3000",
+        "http://localhost:3001", # Add this line
+        "http://127.0.0.1:3001"  # Good practice to add this too
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -423,13 +428,12 @@ def find_free_port(start_port=8002):
             continue
     return None
 
+# At the end of your app.py file
 if __name__ == "__main__":
     import uvicorn
     
-    # Find an available port starting from 8002
-    port = find_free_port(8002)
-    if port:
-        print(f"🚀 Starting server on http://localhost:{port}")
-        uvicorn.run(app, host="0.0.0.0", port=port)
-    else:
-        print("❌ No available ports found")
+    # Define a static port
+    port = 8004
+    
+    print(f"🚀 Starting server on http://localhost:{port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)

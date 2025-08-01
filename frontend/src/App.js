@@ -286,7 +286,8 @@ export default function SeamlessVideoTranslator() {
         });
       }, 1000);
 
-      const response = await fetch('http://localhost:8002/translate', {
+      // *** UPDATED LINE HERE ***
+      const response = await fetch('http://localhost:8004/translate', {
         method: 'POST',
         body: formData,
       });
@@ -299,11 +300,17 @@ export default function SeamlessVideoTranslator() {
         setProcessedVideo(videoUrl);
         setProgress(100);
       } else {
-        throw new Error('Translation failed');
+        const errorData = await response.json().catch(() => ({ detail: 'Translation failed with no specific error message.' }));
+        console.error('Translation failed:', response.status, errorData);
+        alert(`Translation failed: ${errorData.detail || response.statusText}`);
+        setProcessedVideo(null); // Clear any previous video
+        setProgress(0); // Reset progress
       }
     } catch (error) {
       console.error('Error translating video:', error);
-      alert('Translation failed. Please try again.');
+      alert('Translation failed. Please try again. Check console for details.');
+      setProcessedVideo(null); // Clear any previous video
+      setProgress(0); // Reset progress
     } finally {
       setIsProcessing(false);
     }
