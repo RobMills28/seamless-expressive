@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Play, Download, FileVideo, Languages, Loader2 } from 'lucide-react';
+import { Upload, Play, Download, FileVideo, Languages, Loader2, Wand2, Settings } from 'lucide-react';
 
 export default function SeamlessVideoTranslator() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -8,6 +8,12 @@ export default function SeamlessVideoTranslator() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [processedVideo, setProcessedVideo] = useState(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Advanced Controls State
+  const [preserveStyle, setPreserveStyle] = useState(true);
+  const [durationFactor, setDurationFactor] = useState(1.0);
+
   const fileInputRef = useRef(null);
 
   const languages = [
@@ -30,11 +36,12 @@ export default function SeamlessVideoTranslator() {
       minHeight: '100vh',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       padding: '24px',
+      fontFamily: 'sans-serif',
     },
     mainCard: {
       maxWidth: '1024px',
       margin: '0 auto',
-      backgroundColor: 'rgba(255, 255, 255, 0.95)',
+      backgroundColor: 'rgba(255, 255, 255, 0.98)',
       backdropFilter: 'blur(10px)',
       borderRadius: '24px',
       padding: '32px',
@@ -103,13 +110,13 @@ export default function SeamlessVideoTranslator() {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
       gap: '24px',
-      marginBottom: '32px',
+      marginBottom: '24px',
     },
     languageCard: {
       backgroundColor: '#f9fafb',
       padding: '24px',
       borderRadius: '12px',
-      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
     },
     label: {
       display: 'block',
@@ -240,6 +247,60 @@ export default function SeamlessVideoTranslator() {
     hiddenInput: {
       display: 'none',
     },
+    toggleSwitch: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: '16px',
+    },
+    toggleLabel: {
+      fontWeight: '500',
+      color: '#555',
+    },
+    switch: {
+      position: 'relative',
+      display: 'inline-block',
+      width: '60px',
+      height: '34px',
+    },
+    switchInput: {
+      opacity: 0,
+      width: 0,
+      height: 0,
+    },
+    slider: {
+      position: 'absolute',
+      cursor: 'pointer',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: '#ccc',
+      transition: '.4s',
+      borderRadius: '34px',
+    },
+    sliderBefore: {
+      position: 'absolute',
+      content: '""',
+      height: '26px',
+      width: '26px',
+      left: '4px',
+      bottom: '4px',
+      backgroundColor: 'white',
+      transition: '.4s',
+      borderRadius: '50%',
+    },
+    advancedButton: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '8px 16px',
+      borderRadius: '8px',
+      border: '1px solid #ddd',
+      background: 'white',
+      cursor: 'pointer',
+      marginBottom: '16px',
+    },
   };
 
   const handleFileSelect = (event) => {
@@ -273,20 +334,14 @@ export default function SeamlessVideoTranslator() {
     formData.append('video', selectedFile);
     formData.append('source_lang', sourceLanguage);
     formData.append('target_lang', targetLanguage);
+    formData.append('preserve_style', preserveStyle);
+    formData.append('duration_factor', durationFactor);
 
     try {
-      // Simulate progress updates
       const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + Math.random() * 15;
-        });
-      }, 1000);
+        setProgress(prev => Math.min(90, prev + Math.random() * 10));
+      }, 800);
 
-      // *** UPDATED LINE HERE ***
       const response = await fetch('http://localhost:8004/translate', {
         method: 'POST',
         body: formData,
@@ -300,17 +355,17 @@ export default function SeamlessVideoTranslator() {
         setProcessedVideo(videoUrl);
         setProgress(100);
       } else {
-        const errorData = await response.json().catch(() => ({ detail: 'Translation failed with no specific error message.' }));
+        const errorData = await response.json().catch(() => ({ detail: 'Translation failed. Check backend logs.' }));
         console.error('Translation failed:', response.status, errorData);
         alert(`Translation failed: ${errorData.detail || response.statusText}`);
-        setProcessedVideo(null); // Clear any previous video
-        setProgress(0); // Reset progress
+        setProcessedVideo(null);
+        setProgress(0);
       }
     } catch (error) {
       console.error('Error translating video:', error);
       alert('Translation failed. Please try again. Check console for details.');
-      setProcessedVideo(null); // Clear any previous video
-      setProgress(0); // Reset progress
+      setProcessedVideo(null);
+      setProgress(0);
     } finally {
       setIsProcessing(false);
     }
@@ -322,7 +377,7 @@ export default function SeamlessVideoTranslator() {
       a.href = processedVideo;
       a.download = `translated_${selectedFile.name}`;
       document.body.appendChild(a);
-      a.click();
+a.click();
       document.body.removeChild(a);
     }
   };
@@ -330,18 +385,16 @@ export default function SeamlessVideoTranslator() {
   return (
     <div style={styles.container}>
       <div style={styles.mainCard}>
-        {/* Header */}
         <div style={styles.header}>
           <div style={styles.headerTitle}>
-            <Languages size={48} color="#667eea" />
+            <Wand2 size={48} color="#667eea" />
             <h1 style={styles.title}>SeamlessExpressive</h1>
           </div>
           <p style={styles.subtitle}>AI-Powered Video Translation System</p>
           <p style={styles.description}>Upload your video and translate it while preserving emotion and expression</p>
         </div>
 
-        {/* File Upload Area */}
-        <div 
+        <div
           style={styles.uploadArea}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
@@ -372,7 +425,6 @@ export default function SeamlessVideoTranslator() {
           )}
         </div>
 
-        {/* Language Selection */}
         <div style={styles.languageGrid}>
           <div style={styles.languageCard}>
             <label style={styles.label}>Source Language</label>
@@ -405,7 +457,44 @@ export default function SeamlessVideoTranslator() {
           </div>
         </div>
 
-        {/* Progress Bar */}
+        <button onClick={() => setShowAdvanced(!showAdvanced)} style={styles.advancedButton}>
+          <Settings size={18} />
+          {showAdvanced ? 'Hide' : 'Show'} Advanced Controls
+        </button>
+
+        {showAdvanced && (
+          <div style={{...styles.languageCard, marginBottom: '24px', padding: '24px'}}>
+            <h3 style={{marginTop: 0, marginBottom: '24px'}}>Expressive Controls</h3>
+            <div style={styles.toggleSwitch}>
+              <span style={styles.toggleLabel}>
+                Preserve Vocal Style
+                <p style={{fontSize: '0.8rem', color: '#888', margin: '4px 0 0'}}>ON for original voice, OFF for generic voice.</p>
+              </span>
+              <label style={styles.switch}>
+                <input type="checkbox" checked={preserveStyle} onChange={() => setPreserveStyle(!preserveStyle)} style={styles.switchInput} />
+                <span style={{...styles.slider, backgroundColor: preserveStyle ? '#667eea' : '#ccc' }}>
+                  <span style={{...styles.sliderBefore, transform: preserveStyle ? 'translateX(26px)' : 'translateX(0px)'}} />
+                </span>
+              </label>
+            </div>
+            
+            <div>
+              <label style={styles.label}>Speech Rate: {durationFactor.toFixed(1)}x</label>
+              <p style={{fontSize: '0.8rem', color: '#888', margin: '-4px 0 12px'}}>Control speed and pauses. Only affects Expressive model.</p>
+              <input
+                type="range"
+                min="0.5"
+                max="1.5"
+                step="0.1"
+                value={durationFactor}
+                onChange={(e) => setDurationFactor(parseFloat(e.target.value))}
+                disabled={!preserveStyle}
+                style={{ width: '100%', cursor: preserveStyle ? 'pointer' : 'not-allowed' }}
+              />
+            </div>
+          </div>
+        )}
+
         {isProcessing && (
           <div style={{...styles.progressSection, ...styles.progressSectionVisible}}>
             <div style={styles.progressText}>
@@ -413,17 +502,14 @@ export default function SeamlessVideoTranslator() {
               <span style={styles.progressPercent}>{Math.round(progress)}%</span>
             </div>
             <div style={styles.progressBar}>
-              <div 
-                style={{...styles.progressFill, width: `${progress}%`}}
-              ></div>
+              <div style={{...styles.progressFill, width: `${progress}%`}}></div>
             </div>
             <p style={styles.progressDescription}>
-              Translating with SeamlessExpressive AI...
+              Translating with {preserveStyle ? 'SeamlessExpressive' : 'SeamlessM4Tv2'} AI...
             </p>
           </div>
         )}
 
-        {/* Action Buttons */}
         <div style={styles.buttonContainer}>
           <button
             onClick={translateVideo}
@@ -457,7 +543,6 @@ export default function SeamlessVideoTranslator() {
           )}
         </div>
 
-        {/* Video Preview */}
         {processedVideo && (
           <div style={styles.videoPreview}>
             <h3 style={styles.videoPreviewTitle}>Translated Video</h3>

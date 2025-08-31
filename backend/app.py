@@ -11,6 +11,7 @@ from pathlib import Path
 import uuid
 import socket
 from typing import Optional
+import whisper
 
 # Initialize FastAPI app
 app = FastAPI(title="SeamlessExpressive Video Translator")
@@ -111,11 +112,11 @@ def extract_audio_from_video(video_path: str, audio_path: str):
         print(f"Error extracting audio: {e}")
         return False
 
-def translate_audio_with_cli(audio_path: str, output_path: str, source_lang: str, target_lang: str):
+def translate_audio_with_cli(audio_path: str, output_path: str, source_lang: str, target_lang: str, duration_factor: float = 1.0):
     """Translate audio using SeamlessExpressive CLI"""
     try:
-        print(f"🎵 Translating with SeamlessExpressive CLI: {source_lang} -> {target_lang}...")
-        
+        print(f"🎵 Translating with SeamlessExpressive CLI: {source_lang} -> {target_lang} at {duration_factor}x speed...")
+
         # Language code mapping for CLI
         lang_map = {
             "en": "eng", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", 
@@ -137,7 +138,8 @@ def translate_audio_with_cli(audio_path: str, output_path: str, source_lang: str
                 "--tgt_lang", tgt_lang,
                 "--model_name", "seamless_expressivity",
                 "--vocoder_name", "vocoder_pretssel", 
-                "--output_path", output_path
+                "--output_path", output_path,
+                "--duration_factor", str(duration_factor) # ADDED DURATION FACTOR
             ]
             
             if os.path.exists(model_dir):
@@ -168,7 +170,8 @@ def translate_audio_with_cli(audio_path: str, output_path: str, source_lang: str
                 "--model_name", "seamless_expressivity",
                 "--vocoder_name", "vocoder_pretssel",
                 "--output_path", os.path.dirname(output_path),
-                "--audio_root_dir", ""
+                "--audio_root_dir", "",
+                "--duration_factor", str(duration_factor) # ADDED DURATION FACTOR
             ]
             
             if os.path.exists(model_dir):
@@ -200,7 +203,8 @@ def translate_audio_with_cli(audio_path: str, output_path: str, source_lang: str
                 "--tgt_lang", tgt_lang,
                 "--model_name", "seamless_expressivity",
                 "--vocoder_name", "vocoder_pretssel", 
-                "--output_path", output_path
+                "--output_path", output_path,
+                "--duration_factor", str(duration_factor) # ADDED DURATION FACTOR
             ]
             
             if os.path.exists(model_dir):
@@ -221,81 +225,46 @@ def translate_audio_with_cli(audio_path: str, output_path: str, source_lang: str
         print(f"❌ Error in CLI translation: {e}")
         return False
 
-def translate_audio(audio_path: str, output_path: str, source_lang: str, target_lang: str):
-    """Translate audio using available method"""
-    try:
-        if seamless_model is None:
-            raise Exception("No translation model loaded")
-        
-        print(f"🎵 Translating {source_lang} -> {target_lang}...")
-        
-        # Check if we're using SeamlessExpressive CLI
-        if isinstance(seamless_model, str) and seamless_model == "seamless_expressivity":
-            return translate_audio_with_cli(audio_path, output_path, source_lang, target_lang)
-        
-        # Load audio for other methods
-        waveform, sample_rate = torchaudio.load(audio_path)
-        
-        # Resample if necessary
-        if sample_rate != 16000:
-            resampler = torchaudio.transforms.Resample(sample_rate, 16000)
-            waveform = resampler(waveform)
-        
-        # Convert to mono if stereo
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-        
-        # Language code mapping
-        lang_map = {
-            "en": "eng", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", 
-            "pt": "por", "zh": "cmn", "ja": "jpn", "ko": "kor", "ar": "arb", 
-            "hi": "hin", "ru": "rus"
-        }
-        
-        src_lang = lang_map.get(source_lang, source_lang)
-        tgt_lang = lang_map.get(target_lang, target_lang)
-        
-        # Check if we're using SeamlessExpressive Translator
-        if hasattr(seamless_model, 'predict'):
-            # SeamlessExpressive approach
-            print(f"🔄 Using SeamlessExpressive S2ST: {src_lang} -> {tgt_lang}")
-            translated_text, translated_speech, _ = seamless_model.predict(
-                input=waveform.squeeze(),
-                task_str="S2ST",
-                src_lang=src_lang,
-                tgt_lang=tgt_lang,
-            )
+def translate_audio(audio_path: str, output_path: str, source_lang: str, target_lang: str, preserve_style: bool, duration_factor: float):
+    """Translate audio by dispatching to the correct model based on user choice."""
+    
+    if preserve_style:
+        # User wants to preserve vocal style, use the expressive CLI model
+        print("▶️ Dispatching to SeamlessExpressive model...")
+        return translate_audio_with_cli(audio_path, output_path, source_lang, target_lang, duration_factor)
+    
+    else:
+        # User wants a generic voice, use the standard M4Tv2 model
+        print("▶️ Dispatching to standard SeamlessM4Tv2 model...")
+        try:
+            if processor is None or not hasattr(seamless_model, 'generate'):
+                 raise Exception("Standard M4Tv2 model/processor not loaded or incompatible.")
+
+            print(f"🔄 Using HuggingFace SeamlessM4Tv2 for generic voice: {source_lang} -> {target_lang}")
             
-            if translated_speech is not None:
-                if len(translated_speech.shape) == 1:
-                    translated_speech = translated_speech.unsqueeze(0)
-                torchaudio.save(output_path, translated_speech.cpu(), 16000)
-                print(f"✅ SeamlessExpressive translation saved")
-                return True
-                
-        elif processor is not None:
-            # HuggingFace approach
-            print(f"🔄 Using HuggingFace SeamlessM4Tv2: {src_lang} -> {tgt_lang}")
-            audio_inputs = processor(audios=waveform.squeeze().numpy(), sampling_rate=16000, return_tensors="pt")
-            audio_inputs = audio_inputs.to(device)
+            waveform, sample_rate = torchaudio.load(audio_path)
             
-            audio_array = seamless_model.generate(**audio_inputs, tgt_lang=tgt_lang)[0].cpu().numpy().squeeze()
+            if sample_rate != 16000:
+                resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+                waveform = resampler(waveform)
             
-            if len(audio_array.shape) == 1:
-                audio_array = torch.from_numpy(audio_array).unsqueeze(0)
-            else:
-                audio_array = torch.from_numpy(audio_array)
-                
-            torchaudio.save(output_path, audio_array, 16000)
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+
+            audio_inputs = processor(audios=waveform.squeeze(), sampling_rate=16000, return_tensors="pt").to(device)
+            
+            lang_map = { "en": "eng", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", "pt": "por", "zh": "cmn", "ja": "jpn", "ko": "kor", "ar": "arb", "hi": "hin", "ru": "rus"}
+            tgt_lang_code = lang_map.get(target_lang, target_lang)
+
+            audio_array = seamless_model.generate(**audio_inputs, tgt_lang=tgt_lang_code)[0].cpu().numpy().squeeze()
+            
+            torchaudio.save(output_path, torch.from_numpy(audio_array).unsqueeze(0), 16000)
             print(f"✅ HuggingFace translation saved")
             return True
-        
-        print("❌ No compatible translation method found")
-        return False
-        
-    except Exception as e:
-        print(f"❌ Error in translation: {e}")
-        return False
+
+        except Exception as e:
+            print(f"❌ Error during M4Tv2 (generic) translation: {e}")
+            return False
 
 def combine_video_audio(video_path: str, audio_path: str, output_path: str):
     """Combine original video with translated audio"""
@@ -351,7 +320,9 @@ async def translate_video(
     background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
     source_lang: str = Form(...),
-    target_lang: str = Form(...)
+    target_lang: str = Form(...),
+    preserve_style: bool = Form(...),
+    duration_factor: float = Form(...)
 ):
     """Translate video using available model"""
     
@@ -375,8 +346,17 @@ async def translate_video(
         
         # Translate audio
         translated_audio_path = os.path.join(temp_dir, f"{session_id}_translated.wav")
-        if not translate_audio(audio_path, translated_audio_path, source_lang, target_lang):
+        if not translate_audio(audio_path, translated_audio_path, source_lang, target_lang, preserve_style, duration_factor):
             return {"error": "Failed to translate audio"}
+        
+        # Generate transcript from translated audio
+        try:
+            model = whisper.load_model("base")
+            result = model.transcribe(translated_audio_path)
+            transcript = result["text"]
+            print(f"TRANSCRIPT: {transcript}")
+        except Exception as e:
+            print(f"Transcription failed: {e}")
         
         # Combine video with translated audio
         output_path = os.path.join(temp_dir, f"{session_id}_output.mp4")
@@ -416,23 +396,10 @@ async def get_supported_languages():
         ]
     }
 
-def find_free_port(start_port=8002):
-    """Find an available port starting from start_port"""
-    for port in range(start_port, start_port + 20):
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(('localhost', port))
-            sock.close()
-            return port
-        except OSError:
-            continue
-    return None
-
-# At the end of your app.py file
 if __name__ == "__main__":
     import uvicorn
     
-    # Define a static port
+    # Define a static port to match the frontend and avoid conflicts
     port = 8004
     
     print(f"🚀 Starting server on http://localhost:{port}")
