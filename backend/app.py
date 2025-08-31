@@ -12,6 +12,7 @@ import uuid
 import socket
 from typing import Optional
 import whisper
+from speechbrain.pretrained import SpeakerRecognition
 
 # Initialize FastAPI app
 app = FastAPI(title="SeamlessExpressive Video Translator")
@@ -33,6 +34,7 @@ app.add_middleware(
 # Global variables for model
 seamless_model = None
 processor = None
+_speaker_model = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def load_seamless_model():
@@ -287,6 +289,30 @@ def cleanup_temp_dir(temp_dir: str):
     except:
         pass
 
+def get_speaker_model(device="cpu"):
+    """Lazy load speaker recognition model"""
+    global _speaker_model
+    if _speaker_model is None:
+        print("Loading SpeechBrain speaker recognition model...")
+        _speaker_model = SpeakerRecognition.from_hparams(
+            source="speechbrain/spkrec-ecapa-voxceleb", 
+            run_opts={"device": device}
+        )
+    return _speaker_model
+
+def calculate_speaker_similarity(source_audio_path: str, translated_audio_path: str, device="cpu") -> float:
+    """Calculate speaker similarity using SpeechBrain"""
+    print(f"Calculating Speaker Similarity...")
+    try:
+        spkrec_model = get_speaker_model(device)
+        score, _ = spkrec_model.verify_files(source_audio_path, translated_audio_path)
+        return float(score.squeeze())
+    except Exception as e:
+        print(f"Speaker similarity calculation failed: {e}")
+        return 0.0
+
+
+
 @app.on_event("startup")
 async def startup_event():
     """Load model on startup"""
@@ -357,6 +383,10 @@ async def translate_video(
             print(f"TRANSCRIPT: {transcript}")
         except Exception as e:
             print(f"Transcription failed: {e}")
+        
+        # Calculate speaker similarity
+        speaker_sim = calculate_speaker_similarity(audio_path, translated_audio_path, device)
+        print(f"SPEAKER SIMILARITY: {speaker_sim}")
         
         # Combine video with translated audio
         output_path = os.path.join(temp_dir, f"{session_id}_output.mp4")
