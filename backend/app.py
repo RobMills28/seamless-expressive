@@ -13,6 +13,7 @@ import socket
 from typing import Optional
 import whisper
 from speechbrain.pretrained import SpeakerRecognition
+import numpy as np
 
 # Initialize FastAPI app
 app = FastAPI(title="SeamlessExpressive Video Translator")
@@ -311,7 +312,73 @@ def calculate_speaker_similarity(source_audio_path: str, translated_audio_path: 
         print(f"Speaker similarity calculation failed: {e}")
         return 0.0
 
+def calculate_acoustic_features(audio_path: str) -> dict:
+    """Extract acoustic features using librosa"""
+    print(f"Calculating Acoustic Features...")
+    try:
+        import librosa
+        y, sr = librosa.load(audio_path, sr=16000)
+        
+        # Calculate F0 (pitch)
+        f0, _, _ = librosa.pyin(y, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('C7'))
+        f0_mean = np.nanmean(f0) if np.any(f0) else 0.0
+        f0_std = np.nanstd(f0) if np.any(f0) else 0.0
 
+        # Calculate RMS energy and intensity
+        rms_energy = librosa.feature.rms(y=y)
+        intensity_mean = np.mean(rms_energy)
+        intensity_std = np.std(rms_energy)
+        
+        # Calculate RMS and Peak amplitudes
+        rms_mean = np.sqrt(np.mean(y**2))
+        peak_amplitude = np.max(np.abs(y))
+
+        return {
+            "f0_mean": float(f0_mean),
+            "f0_std": float(f0_std),
+            "intensity_mean": float(intensity_mean),
+            "intensity_std": float(intensity_std),
+            "rms_mean": float(rms_mean),
+            "peak_amplitude": float(peak_amplitude)
+        }
+    except Exception as e:
+        print(f"Failed to calculate acoustic features: {e}")
+        return {"f0_mean": 0, "f0_std": 0, "intensity_mean": 0, "intensity_std": 0, "rms_mean": 0, "peak_amplitude": 0}
+
+def get_audio_emotion(audio_path: str) -> str:
+    """Analyze emotion from audio using acoustic features"""
+    try:
+        import librosa
+        import numpy as np
+        
+        y, sr = librosa.load(audio_path, sr=16000)
+        
+        if len(y) == 0:
+            return "neutral"
+        
+        # Calculate energy and pitch variation as emotion indicators
+        rms = librosa.feature.rms(y=y)[0]
+        energy = np.mean(rms)
+        
+        f0, _, _ = librosa.pyin(y, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('C7'))
+        voiced_f0 = f0[~np.isnan(f0)]
+        pitch_variation = np.std(voiced_f0) if len(voiced_f0) > 0 else 0.0
+        
+        # Simple classification based on energy and pitch variation
+        if energy > 0.02 and pitch_variation > 20:
+            emotion = "excited"
+        elif energy < 0.01:
+            emotion = "calm"
+        elif pitch_variation > 15:
+            emotion = "expressive"
+        else:
+            emotion = "neutral"
+        
+        return emotion
+        
+    except Exception as e:
+        print(f"Error analyzing audio emotion: {e}")
+        return "neutral"
 
 @app.on_event("startup")
 async def startup_event():
@@ -387,6 +454,26 @@ async def translate_video(
         # Calculate speaker similarity
         speaker_sim = calculate_speaker_similarity(audio_path, translated_audio_path, device)
         print(f"SPEAKER SIMILARITY: {speaker_sim}")
+        
+        # Calculate acoustic features for both audios
+        original_features = calculate_acoustic_features(audio_path)
+        translated_features = calculate_acoustic_features(translated_audio_path)
+        
+        # Calculate differences
+        f0_diff = abs(original_features["f0_mean"] - translated_features["f0_mean"])
+        intensity_diff = abs(original_features["intensity_mean"] - translated_features["intensity_mean"])
+        
+        print(f"ORIGINAL RMS: {original_features['rms_mean']:.4f}, Peak: {original_features['peak_amplitude']:.4f}")
+        print(f"TRANSLATED RMS: {translated_features['rms_mean']:.4f}, Peak: {translated_features['peak_amplitude']:.4f}")
+        print(f"F0 DIFFERENCE: {f0_diff:.2f}")
+        print(f"INTENSITY DIFFERENCE: {intensity_diff:.4f}")
+        
+        # Get audio emotions
+        original_emotion = get_audio_emotion(audio_path)
+        translated_emotion = get_audio_emotion(translated_audio_path)
+        emotion_consistent = original_emotion == translated_emotion
+        
+        print(f"AUDIO EMOTION - Original: {original_emotion}, Translated: {translated_emotion}, Consistent: {emotion_consistent}")
         
         # Combine video with translated audio
         output_path = os.path.join(temp_dir, f"{session_id}_output.mp4")
