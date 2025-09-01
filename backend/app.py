@@ -14,6 +14,11 @@ from typing import Optional
 import whisper
 from speechbrain.pretrained import SpeakerRecognition
 import numpy as np
+import librosa
+import cv2   
+import time
+from scipy.stats import pearsonr
+ 
 
 # Initialize FastAPI app
 app = FastAPI(title="SeamlessExpressive Video Translator")
@@ -380,6 +385,114 @@ def get_audio_emotion(audio_path: str) -> str:
         print(f"Error analyzing audio emotion: {e}")
         return "neutral"
 
+def calculate_lip_sync_quality(video_path: str, audio_path: str) -> float:
+    """Calculate lip-sync quality using MediaPipe landmarks and audio correlation"""
+    print("Calculating lip-sync quality...")
+    
+    try:
+        import mediapipe as mp
+        
+        # Initialize MediaPipe Face Mesh
+        mp_face_mesh = mp.solutions.face_mesh
+        face_mesh = mp_face_mesh.FaceMesh(
+            static_image_mode=False,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        
+        # Extract mouth openings from video
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0:
+            return 0.0
+            
+        mouth_openings = []
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_mesh.process(rgb_frame)
+            
+            if results.multi_face_landmarks:
+                landmarks = results.multi_face_landmarks[0]
+                upper_lip = landmarks.landmark[13]  # Upper lip center
+                lower_lip = landmarks.landmark[14]  # Lower lip center
+                
+                mouth_opening = np.sqrt(
+                    (upper_lip.x - lower_lip.x)**2 + (upper_lip.y - lower_lip.y)**2
+                )
+                mouth_openings.append(mouth_opening)
+            else:
+                mouth_openings.append(0.0)
+                
+        cap.release()
+        
+        # Extract audio envelope
+        y, sr = librosa.load(audio_path, sr=16000)
+        frame_length = int(sr / fps)
+        
+        audio_envelope = []
+        for i in range(0, len(y), frame_length):
+            chunk = y[i:i + frame_length]
+            if len(chunk) > 0:
+                audio_envelope.append(np.mean(np.abs(chunk)))
+                
+        # Calculate correlation
+        min_len = min(len(mouth_openings), len(audio_envelope))
+        if min_len > 1:
+            correlation, _ = pearsonr(mouth_openings[:min_len], audio_envelope[:min_len])
+            return float(correlation) if not np.isnan(correlation) else 0.0
+        else:
+            return 0.0
+            
+    except Exception as e:
+        print(f"Lip-sync calculation failed: {e}")
+        return 0.0
+
+def get_visual_emotion(video_path: str) -> str:
+    """Get visual emotion using DeepFace"""
+    print("Calculating visual emotion...")
+    try:
+        from deepface import DeepFace
+        
+        cap = cv2.VideoCapture(video_path)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        mid_frame_index = frame_count // 2
+        cap.set(cv2.CAP_PROP_POS_FRAMES, mid_frame_index)
+        
+        ret, frame = cap.read()
+        cap.release()
+        
+        if not ret:
+            return "error_or_no_face"
+
+        # Save temporary frame
+        temp_frame_path = f"temp_frame_{int(time.time())}.jpg"
+        cv2.imwrite(temp_frame_path, frame)
+
+        analysis = DeepFace.analyze(
+            img_path=temp_frame_path, 
+            actions=['emotion'], 
+            enforce_detection=True,
+            silent=True
+        )
+        
+        import os
+        os.remove(temp_frame_path)  # Cleanup
+        
+        if analysis and isinstance(analysis, list):
+            return analysis[0]['dominant_emotion']
+        return "no_face_detected"
+        
+    except Exception as e:
+        print(f"Visual emotion classification failed: {e}")
+        return "error_or_no_face"
+
 @app.on_event("startup")
 async def startup_event():
     """Load model on startup"""
@@ -437,10 +550,44 @@ async def translate_video(
         if not extract_audio_from_video(video_path, audio_path):
             return {"error": "Failed to extract audio from video"}
         
-        # Translate audio
+        # Get original video duration
+        import cv2
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        original_video_duration = frame_count / fps
+        cap.release()
+        
+        # Get original audio duration
+        import librosa
+        y_orig, sr = librosa.load(audio_path, sr=None)
+        original_audio_duration = len(y_orig) / sr
+        
+        print(f"ORIGINAL VIDEO DURATION: {original_video_duration:.2f}s")
+        print(f"ORIGINAL AUDIO DURATION: {original_audio_duration:.2f}s")
+        
+        # Translate audio with timing
+        import time
+        translation_start = time.time()
         translated_audio_path = os.path.join(temp_dir, f"{session_id}_translated.wav")
         if not translate_audio(audio_path, translated_audio_path, source_lang, target_lang, preserve_style, duration_factor):
             return {"error": "Failed to translate audio"}
+        translation_end = time.time()
+        
+        # Get translated audio duration
+        y_trans, sr = librosa.load(translated_audio_path, sr=None)
+        translated_audio_duration = len(y_trans) / sr
+        
+        processing_time = translation_end - translation_start
+        duration_ratio = translated_audio_duration / original_audio_duration
+        
+        print(f"TRANSLATION PROCESSING TIME: {processing_time:.2f}s")
+        print(f"TRANSLATED AUDIO DURATION: {translated_audio_duration:.2f}s")
+        print(f"DURATION RATIO: {duration_ratio:.3f}")
+        print(f"AUDIO-VIDEO SYNC GAP: {abs(original_video_duration - translated_audio_duration):.2f}s")
+        
+        if translated_audio_duration < original_video_duration:
+            print(f"WARNING: Audio finishes {original_video_duration - translated_audio_duration:.2f}s before video ends")
         
         # Generate transcript from translated audio
         try:
@@ -479,6 +626,21 @@ async def translate_video(
         output_path = os.path.join(temp_dir, f"{session_id}_output.mp4")
         if not combine_video_audio(video_path, translated_audio_path, output_path):
             return {"error": "Failed to combine video with translated audio"}
+        
+        # Get visual emotions
+        try:
+            original_visual_emotion = get_visual_emotion(video_path)
+            translated_visual_emotion = get_visual_emotion(output_path)  # This should be after combine_video_audio
+            visual_emotion_consistent = original_visual_emotion == translated_visual_emotion
+            
+            print(f"VISUAL EMOTION - Original: {original_visual_emotion}, Translated: {translated_visual_emotion}, Consistent: {visual_emotion_consistent}")
+            
+            # Calculate lip sync quality (only for translated video since SeamlessM4T doesn't sync)
+            lip_sync_score = calculate_lip_sync_quality(output_path, translated_audio_path)
+            print(f"LIP SYNC SCORE: {lip_sync_score:.4f}")
+            
+        except Exception as e:
+            print(f"Visual analysis failed: {e}")
         
         # Return the translated video
         background_tasks.add_task(cleanup_temp_dir, temp_dir)
