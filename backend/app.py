@@ -493,6 +493,163 @@ def get_visual_emotion(video_path: str) -> str:
         print(f"Visual emotion classification failed: {e}")
         return "error_or_no_face"
 
+def calculate_visual_identity_similarity(original_video_path: str, translated_video_path: str) -> float:
+    """Calculate facial identity similarity using DeepFace"""
+    print("Calculating visual identity similarity...")
+    try:
+        from deepface import DeepFace
+        
+        # Extract middle frames from both videos
+        cap1 = cv2.VideoCapture(original_video_path)
+        frame_count1 = int(cap1.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap1.set(cv2.CAP_PROP_POS_FRAMES, frame_count1 // 2)
+        ret1, frame1 = cap1.read()
+        cap1.release()
+        
+        cap2 = cv2.VideoCapture(translated_video_path)
+        frame_count2 = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap2.set(cv2.CAP_PROP_POS_FRAMES, frame_count2 // 2)
+        ret2, frame2 = cap2.read()
+        cap2.release()
+        
+        if not ret1 or not ret2:
+            return 0.0
+            
+        # Save temporary frames
+        frame1_path = f"temp_original_{int(time.time())}.jpg"
+        frame2_path = f"temp_translated_{int(time.time())}.jpg"
+        cv2.imwrite(frame1_path, frame1)
+        cv2.imwrite(frame2_path, frame2)
+        
+        try:
+            result = DeepFace.verify(
+                frame1_path, 
+                frame2_path,
+                model_name="ArcFace",
+                enforce_detection=False
+            )
+            distance = result['distance']
+            similarity = 1.0 / (1.0 + distance)
+            
+            import os
+            os.remove(frame1_path)
+            os.remove(frame2_path)
+            
+            return float(similarity)
+        except:
+            import os
+            os.remove(frame1_path)
+            os.remove(frame2_path)
+            return 0.0
+            
+    except Exception as e:
+        print(f"Visual identity similarity calculation failed: {e}")
+        return 0.0
+
+def calculate_visual_quality_lpips(original_video_path: str, translated_video_path: str) -> float:
+    """Calculate visual quality using LPIPS if available, otherwise SSIM"""
+    print("Calculating visual quality...")
+    try:
+        # Try LPIPS first
+        try:
+            import lpips
+            import torch
+            
+            lpips_model = lpips.LPIPS(net='alex')
+            
+            # Extract frames
+            cap1 = cv2.VideoCapture(original_video_path)
+            frame_count1 = int(cap1.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap1.set(cv2.CAP_PROP_POS_FRAMES, frame_count1 // 2)
+            ret1, frame1 = cap1.read()
+            cap1.release()
+            
+            cap2 = cv2.VideoCapture(translated_video_path)
+            frame_count2 = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap2.set(cv2.CAP_PROP_POS_FRAMES, frame_count2 // 2)
+            ret2, frame2 = cap2.read()
+            cap2.release()
+            
+            if not ret1 or not ret2:
+                return 0.0
+                
+            def preprocess_frame(frame):
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_rgb = cv2.resize(frame_rgb, (224, 224))
+                tensor = torch.from_numpy(frame_rgb).permute(2, 0, 1).float()
+                tensor = (tensor / 255.0) * 2.0 - 1.0
+                return tensor.unsqueeze(0)
+            
+            tensor1 = preprocess_frame(frame1)
+            tensor2 = preprocess_frame(frame2)
+            
+            with torch.no_grad():
+                lpips_distance = lpips_model(tensor1, tensor2)
+            
+            return float(lpips_distance.item())
+            
+        except:
+            # Fallback to SSIM
+            from skimage.metrics import structural_similarity as ssim
+            
+            cap1 = cv2.VideoCapture(original_video_path)
+            frame_count1 = int(cap1.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap1.set(cv2.CAP_PROP_POS_FRAMES, frame_count1 // 2)
+            ret1, frame1 = cap1.read()
+            cap1.release()
+            
+            cap2 = cv2.VideoCapture(translated_video_path)
+            frame_count2 = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap2.set(cv2.CAP_PROP_POS_FRAMES, frame_count2 // 2)
+            ret2, frame2 = cap2.read()
+            cap2.release()
+            
+            if not ret1 or not ret2:
+                return 0.0
+                
+            gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+            gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+            
+            height, width = min(gray1.shape[0], gray2.shape[0]), min(gray1.shape[1], gray2.shape[1])
+            gray1 = cv2.resize(gray1, (width, height))
+            gray2 = cv2.resize(gray2, (width, height))
+            
+            ssim_score = ssim(gray1, gray2)
+            return float(ssim_score)
+            
+    except Exception as e:
+        print(f"Visual quality calculation failed: {e}")
+        return 0.0
+
+def get_deepfake_score(video_path: str) -> float:
+    """Basic deepfake detection using video quality heuristics"""
+    print("Running basic deepfake detection...")
+    try:
+        cap = cv2.VideoCapture(video_path)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count // 2)
+        ret, frame = cap.read()
+        cap.release()
+        
+        if not ret:
+            return 0.5
+            
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        if laplacian_var < 100:
+            score = 0.7
+        elif laplacian_var < 200:
+            score = 0.4
+        else:
+            score = 0.2
+            
+        return float(score)
+        
+    except Exception as e:
+        print(f"Basic deepfake detection failed: {e}")
+        return 0.5
+
 @app.on_event("startup")
 async def startup_event():
     """Load model on startup"""
@@ -627,20 +784,44 @@ async def translate_video(
         if not combine_video_audio(video_path, translated_audio_path, output_path):
             return {"error": "Failed to combine video with translated audio"}
         
-        # Get visual emotions
+        # Comprehensive Visual and Performance Analysis
         try:
+            # Visual Emotions
             original_visual_emotion = get_visual_emotion(video_path)
-            translated_visual_emotion = get_visual_emotion(output_path)  # This should be after combine_video_audio
+            translated_visual_emotion = get_visual_emotion(output_path)
             visual_emotion_consistent = original_visual_emotion == translated_visual_emotion
             
             print(f"VISUAL EMOTION - Original: {original_visual_emotion}, Translated: {translated_visual_emotion}, Consistent: {visual_emotion_consistent}")
             
-            # Calculate lip sync quality (only for translated video since SeamlessM4T doesn't sync)
+            # Lip Sync Quality
             lip_sync_score = calculate_lip_sync_quality(output_path, translated_audio_path)
             print(f"LIP SYNC SCORE: {lip_sync_score:.4f}")
             
+            # Visual Identity Similarity
+            visual_identity = calculate_visual_identity_similarity(video_path, output_path)
+            print(f"VISUAL IDENTITY SIMILARITY: {visual_identity:.4f}")
+            
+            # Visual Quality (LPIPS)
+            visual_quality = calculate_visual_quality_lpips(video_path, output_path)
+            print(f"VISUAL QUALITY (LPIPS): {visual_quality:.4f}")
+            
+            # Deepfake Score
+            deepfake_score = get_deepfake_score(output_path)
+            print(f"DEEPFAKE SCORE: {deepfake_score:.1f}")
+            
+            # Temporal Analysis
+            temporal_compression_ratio = translated_audio_duration / original_audio_duration
+            real_time_factor = processing_time / original_video_duration
+            pause_count = 0  # SeamlessM4T doesn't analyze pauses like your system
+            
+            print(f"TEMPORAL COMPRESSION RATIO: {temporal_compression_ratio:.3f}")
+            print(f"REAL-TIME FACTOR: {real_time_factor:.2f}x")
+            print(f"PAUSE COUNT: {pause_count}")
+            print(f"ORIGINAL DURATION: {original_video_duration:.2f}s")
+            print(f"MAPPED DURATION: {translated_audio_duration:.2f}s (SeamlessM4T doesn't remap)")
+            
         except Exception as e:
-            print(f"Visual analysis failed: {e}")
+            print(f"Comprehensive analysis failed: {e}")
         
         # Return the translated video
         background_tasks.add_task(cleanup_temp_dir, temp_dir)
