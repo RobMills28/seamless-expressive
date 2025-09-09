@@ -41,6 +41,9 @@ app.add_middleware(
 seamless_model = None
 processor = None
 _speaker_model = None
+blaser_model = None
+text_embedder = None
+speech_embedder = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def load_seamless_model():
@@ -104,6 +107,74 @@ def load_seamless_model():
     except Exception as e:
         print(f"❌ All loading methods failed: {e}")
         seamless_model = None
+
+def load_blaser_models():
+    """Load BLASER 2.0 models for speech quality evaluation"""
+    global blaser_model, text_embedder, speech_embedder
+    
+    try:
+        print("Loading BLASER 2.0 models...")
+        
+        from sonar.inference_pipelines.text import TextToEmbeddingModelPipeline
+        from sonar.inference_pipelines.speech import SpeechToEmbeddingModelPipeline
+        from sonar.models.blaser.loader import load_blaser_model
+        
+        # Load BLASER 2.0 reference-based model
+        blaser_model = load_blaser_model("blaser_2_0_ref").eval()
+        
+        # Load text embedder
+        text_embedder = TextToEmbeddingModelPipeline(
+            encoder="text_sonar_basic_encoder", 
+            tokenizer="text_sonar_basic_encoder"
+        )
+        
+        # Load speech embedder  
+        speech_embedder = SpeechToEmbeddingModelPipeline(
+            encoder="sonar_speech_encoder_eng"
+        )
+        
+        print("BLASER 2.0 models loaded successfully")
+        
+    except Exception as e:
+        print(f"Warning: BLASER 2.0 models failed to load: {e}")
+        print("Install with: pip install sonar-space fairseq2")
+
+def calculate_blaser_score(source_audio_path: str, translated_audio_path: str, 
+                          source_lang: str, target_lang: str, 
+                          original_transcript: str = "", translated_transcript: str = "") -> dict:
+    """Calculate BLASER 2.0 speech translation quality score"""
+    
+    if not all([blaser_model, text_embedder, speech_embedder]):
+        return {"blaser_score": 0.0, "translation_quality": "unknown"}
+    
+    try:
+        lang_map = {
+            "en": "eng_Latn", "es": "spa_Latn", "fr": "fra_Latn", 
+            "de": "deu_Latn", "it": "ita_Latn", "pt": "por_Latn",
+            "zh": "cmn_Hans", "ja": "jpn_Jpan", "ko": "kor_Hang",
+            "ar": "arb_Arab", "hi": "hin_Deva", "ru": "rus_Cyrl"
+        }
+        
+        src_lang_code = lang_map.get(source_lang, "eng_Latn")
+        tgt_lang_code = lang_map.get(target_lang, "spa_Latn")
+        
+        source_emb = speech_embedder.predict([source_audio_path], source_lang=src_lang_code)
+        translated_emb = speech_embedder.predict([translated_audio_path], source_lang=tgt_lang_code)
+        
+        if translated_transcript:
+            ref_emb = text_embedder.predict([translated_transcript], source_lang=tgt_lang_code)
+            blaser_score = blaser_model(src=source_emb, ref=ref_emb, mt=translated_emb).item()
+        else:
+            from sonar.models.blaser.loader import load_blaser_model
+            blaser_qe = load_blaser_model("blaser_2_0_qe").eval() 
+            blaser_score = blaser_qe(src=source_emb, mt=translated_emb).item()
+        
+        quality = "excellent" if blaser_score >= 4.5 else "good" if blaser_score >= 3.5 else "fair" if blaser_score >= 2.5 else "poor"
+            
+        return {"blaser_score": round(blaser_score, 3), "translation_quality": quality}
+        
+    except Exception as e:
+        return {"blaser_score": 0.0, "translation_quality": "error"}
 
 def extract_audio_from_video(video_path: str, audio_path: str):
     """Extract audio from video using ffmpeg"""
@@ -654,6 +725,7 @@ def get_deepfake_score(video_path: str) -> float:
 async def startup_event():
     """Load model on startup"""
     load_seamless_model()
+    load_blaser_models()
 
 @app.get("/")
 async def root():
@@ -746,27 +818,46 @@ async def translate_video(
         if translated_audio_duration < original_video_duration:
             print(f"WARNING: Audio finishes {original_video_duration - translated_audio_duration:.2f}s before video ends")
         
-        # Generate transcript from translated audio
+        # Generate transcripts from both original and translated audio
         try:
             model = whisper.load_model("base")
-            result = model.transcribe(translated_audio_path)
-            transcript = result["text"]
-            print(f"TRANSCRIPT: {transcript}")
+            
+            # Transcribe original audio
+            original_result = model.transcribe(audio_path)
+            original_transcript = original_result["text"]
+            print(f"ORIGINAL TRANSCRIPT: {original_transcript}")
+            
+            # Transcribe translated audio
+            translated_result = model.transcribe(translated_audio_path)
+            translated_transcript = translated_result["text"]
+            print(f"TRANSLATED TRANSCRIPT: {translated_transcript}")
+            
         except Exception as e:
             print(f"Transcription failed: {e}")
+            original_transcript = ""
+            translated_transcript = ""
         
-        # Calculate speaker similarity
+        # Calculate speaker similarity (KEEPING EXISTING CODE)
         speaker_sim = calculate_speaker_similarity(audio_path, translated_audio_path, device)
         print(f"SPEAKER SIMILARITY: {speaker_sim}")
-        
-        # Calculate acoustic features for both audios
+
+        # ADD BLASER 2.0 EVALUATION (NEW CODE)
+        blaser_result = calculate_blaser_score(
+            audio_path, translated_audio_path, 
+            source_lang, target_lang,
+            original_transcript, translated_transcript
+        )
+        print(f"BLASER 2.0 SCORE: {blaser_result['blaser_score']}")
+        print(f"TRANSLATION QUALITY: {blaser_result['translation_quality']}")
+
+        # Calculate acoustic features for both audios (KEEPING EXISTING CODE)
         original_features = calculate_acoustic_features(audio_path)
         translated_features = calculate_acoustic_features(translated_audio_path)
-        
-        # Calculate differences
+
+        # Calculate differences (KEEPING EXISTING CODE)
         f0_diff = abs(original_features["f0_mean"] - translated_features["f0_mean"])
         intensity_diff = abs(original_features["intensity_mean"] - translated_features["intensity_mean"])
-        
+
         print(f"ORIGINAL RMS: {original_features['rms_mean']:.4f}, Peak: {original_features['peak_amplitude']:.4f}")
         print(f"TRANSLATED RMS: {translated_features['rms_mean']:.4f}, Peak: {translated_features['peak_amplitude']:.4f}")
         print(f"F0 DIFFERENCE: {f0_diff:.2f}")
