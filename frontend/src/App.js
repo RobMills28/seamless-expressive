@@ -389,7 +389,7 @@ a.click();
           <div style={styles.headerTitle}>
             <h1 style={styles.title}>SeamlessExpressive</h1>
           </div>
-          <p style={styles.subtitle}>AI-Powered Video Translation System</p>
+          <p style={styles.subtitle}>AI-Powered Video Translation System For Master's Thesis</p>
         </div>
 
         <div
