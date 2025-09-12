@@ -387,11 +387,9 @@ a.click();
       <div style={styles.mainCard}>
         <div style={styles.header}>
           <div style={styles.headerTitle}>
-            <Wand2 size={48} color="#667eea" />
             <h1 style={styles.title}>SeamlessExpressive</h1>
           </div>
           <p style={styles.subtitle}>AI-Powered Video Translation System</p>
-          <p style={styles.description}>Upload your video and translate it while preserving emotion and expression</p>
         </div>
 
         <div

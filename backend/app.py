@@ -903,7 +903,7 @@ async def translate_video(
             # Temporal Analysis
             temporal_compression_ratio = translated_audio_duration / original_audio_duration
             real_time_factor = processing_time / original_video_duration
-            pause_count = 0  # SeamlessM4T doesn't analyze pauses like your system
+            pause_count = 0  # SeamlessM4T doesn't analyse pauses like the MCF
             
             print(f"TEMPORAL COMPRESSION RATIO: {temporal_compression_ratio:.3f}")
             print(f"REAL-TIME FACTOR: {real_time_factor:.2f}x")
